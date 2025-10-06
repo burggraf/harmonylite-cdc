@@ -1,0 +1,191 @@
+openapi: 3.0.3
+info:
+  title: HarmonyLite CDC Health API
+  description: Health check and observability endpoints for WAL-based replication system
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Default health check port
+paths:
+  /health/live:
+    get:
+      summary: Liveness probe
+      description: Returns 200 if process is running (FR-057)
+      operationId: getLiveness
+      responses:
+        '200':
+          description: Process is alive
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "OK"
+        '500':
+          description: Process is not responding
+
+  /health/ready:
+    get:
+      summary: Readiness probe
+      description: Returns 200 if parser and NATS are connected (FR-058)
+      operationId: getReadiness
+      responses:
+        '200':
+          description: System is ready to handle replication
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ready"
+                  parser_running:
+                    type: boolean
+                    example: true
+                  nats_connected:
+                    type: boolean
+                    example: true
+        '503':
+          description: System is not ready (parser stopped or NATS unavailable)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "not_ready"
+                  parser_running:
+                    type: boolean
+                    example: false
+                  nats_connected:
+                    type: boolean
+                    example: true
+                  reason:
+                    type: string
+                    example: "parser crashed"
+
+  /health/status:
+    get:
+      summary: Detailed status
+      description: Returns comprehensive system status (FR-059)
+      operationId: getStatus
+      responses:
+        '200':
+          description: Detailed system status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemStatus'
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      description: Exposes all Prometheus metrics (FR-056)
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Prometheus metrics in text format
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  # HELP harmonylite_cdc_last_lsn Last LSN parsed from WAL
+                  # TYPE harmonylite_cdc_last_lsn gauge
+                  harmonylite_cdc_last_lsn{node_id="node-1"} 2500
+
+                  # HELP harmonylite_replication_lag_seconds Time since last parsed change
+                  # TYPE harmonylite_replication_lag_seconds gauge
+                  harmonylite_replication_lag_seconds{node_id="node-1"} 0.5
+
+components:
+  schemas:
+    SystemStatus:
+      type: object
+      required:
+        - status
+        - node_id
+        - parser
+        - nats
+        - wal
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          description: Overall system health
+        node_id:
+          type: string
+          description: This node's identifier
+        parser:
+          $ref: '#/components/schemas/ParserStatus'
+        nats:
+          $ref: '#/components/schemas/NatsStatus'
+        wal:
+          $ref: '#/components/schemas/WalStatus'
+
+    ParserStatus:
+      type: object
+      required:
+        - running
+        - last_lsn
+        - last_replicated_lsn
+        - lag_lsn
+        - lag_seconds
+      properties:
+        running:
+          type: boolean
+          description: Parser is actively running
+        last_lsn:
+          type: integer
+          description: Latest LSN parsed from WAL
+          minimum: 0
+        last_replicated_lsn:
+          type: integer
+          description: Latest LSN confirmed replicated to NATS
+          minimum: 0
+        lag_lsn:
+          type: integer
+          description: Distance between WAL end and parser position
+          minimum: 0
+        lag_seconds:
+          type: number
+          format: float
+          description: Time since last parsed change
+          minimum: 0
+
+    NatsStatus:
+      type: object
+      required:
+        - connected
+        - url
+      properties:
+        connected:
+          type: boolean
+          description: NATS connection active
+        url:
+          type: string
+          description: NATS server URL
+          example: "nats://nats-1:4222"
+        last_reconnect:
+          type: string
+          format: date-time
+          description: Last reconnection timestamp (if reconnected)
+
+    WalStatus:
+      type: object
+      required:
+        - size_bytes
+        - last_checkpoint_lsn
+      properties:
+        size_bytes:
+          type: integer
+          description: Current WAL file size
+          minimum: 0
+        last_checkpoint_lsn:
+          type: integer
+          description: LSN of last checkpoint
+          minimum: 0
+        checkpoint_needed:
+          type: boolean
+          description: WAL size exceeds threshold

@@ -1,0 +1,145 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ReplicationMessage",
+  "description": "NATS JetStream message schema for WAL-based replication",
+  "type": "object",
+  "required": ["op_id", "node_id", "db_id", "schema_version", "wall_time", "lamport", "transaction"],
+  "properties": {
+    "op_id": {
+      "type": "string",
+      "description": "Unique operation identifier (format: {node_id}:{lsn}:{timestamp})",
+      "pattern": "^[a-zA-Z0-9_-]+:[0-9]+:[0-9]+$",
+      "examples": ["node-1:1234:1704067200"]
+    },
+    "node_id": {
+      "type": "string",
+      "description": "Originating node identifier",
+      "minLength": 1,
+      "maxLength": 64,
+      "examples": ["node-1", "pocketbase-primary"]
+    },
+    "db_id": {
+      "type": "string",
+      "description": "Database identifier",
+      "minLength": 1,
+      "maxLength": 64,
+      "examples": ["pocketbase-main", "app-db"]
+    },
+    "schema_version": {
+      "type": "integer",
+      "description": "Message schema version for compatibility",
+      "minimum": 1,
+      "const": 1
+    },
+    "wall_time": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Wall clock timestamp (RFC 3339)",
+      "examples": ["2025-01-01T12:00:00Z"]
+    },
+    "lamport": {
+      "type": "integer",
+      "description": "Lamport logical clock for event ordering",
+      "minimum": 0,
+      "examples": [42, 1000]
+    },
+    "transaction": {
+      "type": "array",
+      "description": "Atomic batch of changes",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/Change"
+      }
+    }
+  },
+  "definitions": {
+    "Change": {
+      "type": "object",
+      "required": ["op_id", "node_id", "lsn", "table", "primary_key", "type", "transaction_id", "commit_lsn"],
+      "properties": {
+        "op_id": {
+          "type": "string",
+          "description": "Unique operation identifier"
+        },
+        "node_id": {
+          "type": "string",
+          "description": "Originating node identifier"
+        },
+        "lsn": {
+          "type": "integer",
+          "description": "Log Sequence Number in WAL",
+          "minimum": 0
+        },
+        "table": {
+          "type": "string",
+          "description": "Table name",
+          "minLength": 1
+        },
+        "primary_key": {
+          "type": "array",
+          "description": "Primary key value(s)",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {"type": "string"},
+              {"type": "integer"},
+              {"type": "number"}
+            ]
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": ["INSERT", "UPDATE", "DELETE"],
+          "description": "Operation type"
+        },
+        "columns": {
+          "type": "object",
+          "description": "All column values (optional)",
+          "additionalProperties": true
+        },
+        "before": {
+          "type": "object",
+          "description": "Old values for UPDATE/DELETE",
+          "additionalProperties": true
+        },
+        "after": {
+          "type": "object",
+          "description": "New values for INSERT/UPDATE",
+          "additionalProperties": true
+        },
+        "transaction_id": {
+          "type": "string",
+          "description": "Groups operations in same transaction"
+        },
+        "commit_lsn": {
+          "type": "integer",
+          "description": "LSN of transaction commit frame",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "examples": [{
+    "op_id": "node-1:1234:1704067200",
+    "node_id": "node-1",
+    "db_id": "pocketbase-main",
+    "schema_version": 1,
+    "wall_time": "2025-01-01T12:00:00Z",
+    "lamport": 42,
+    "transaction": [{
+      "op_id": "node-1:1234:1704067200",
+      "node_id": "node-1",
+      "lsn": 1234,
+      "table": "users",
+      "primary_key": ["user-123"],
+      "type": "INSERT",
+      "after": {
+        "id": "user-123",
+        "email": "user@example.com",
+        "created": "2025-01-01T12:00:00Z"
+      },
+      "transaction_id": "node-1:txn:1234",
+      "commit_lsn": 1240
+    }]
+  }]
+}

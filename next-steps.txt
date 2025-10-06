@@ -1,0 +1,14 @@
+╭─────────────────────────────────────────────────────────────────────────────╮
+│                                                                             │
+│  1. Go to the project folder: cd trivia-party4.5  x                         │
+│  2. Start using slash commands with your AI agent:                          │
+│     2.1 /constitution - Establish project principles                        │
+│     2.2 /specify - Create specifications                                    │
+│     2.3 /clarify - Clarify and de-risk specification (run before /plan)     │
+│     2.4 /plan - Create implementation plans                                 │
+│     2.5 /tasks - Generate actionable tasks                                  │
+│     2.6 /analyze - Validate alignment & surface inconsistencies (read-only) │
+      2.6a /init - CLAUDE.md
+│     2.7 /implement - Execute implementation                                 │
+│                                                                             │
+╰─────────────────────────────────────────────────────────────────────────────╯
