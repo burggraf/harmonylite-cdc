@@ -101,6 +101,42 @@ type HealthCheckConfiguration struct {
 	Detailed bool   `toml:"detailed"`
 }
 
+// WALParserConfiguration defines settings for WAL file parsing
+type WALParserConfiguration struct {
+	BufferSize           int    `toml:"buffer_size"`            // In-memory transaction buffer size (operations)
+	DiskBufferThreshold  int    `toml:"disk_buffer_threshold"`  // When to spill to disk (operations)
+	CheckpointThreshold  int64  `toml:"checkpoint_threshold"`   // WAL size in bytes that triggers checkpoint
+	WatchInterval        int    `toml:"watch_interval"`         // Filesystem watch debounce interval (milliseconds)
+}
+
+// CheckpointConfiguration defines checkpoint coordination settings
+type CheckpointConfiguration struct {
+	DisableAutoCheckpoint bool   `toml:"disable_auto_checkpoint"` // Disable SQLite's automatic checkpoint
+	StateFile             string `toml:"state_file"`              // Path to local LSN state file
+	ForceCheckpointWALMB  int    `toml:"force_checkpoint_wal_mb"` // Force checkpoint when WAL exceeds this size (MB)
+}
+
+// DeduplicationConfiguration defines OpID deduplication settings
+type DeduplicationConfiguration struct {
+	RetentionWindow int    `toml:"retention_window"` // OpID retention window in milliseconds
+	DBPath          string `toml:"db_path"`          // Path to deduplication database
+}
+
+// ConflictResolutionStrategy defines how to resolve concurrent writes
+type ConflictResolutionStrategy string
+
+const (
+	StrategyLWW        ConflictResolutionStrategy = "lww"         // Last-Write-Wins
+	StrategyCounter    ConflictResolutionStrategy = "counter"     // Sum increments
+	StrategyAppendOnly ConflictResolutionStrategy = "append-only" // Append all writes
+)
+
+// ConflictResolutionConfiguration defines conflict resolution settings
+type ConflictResolutionConfiguration struct {
+	DefaultStrategy ConflictResolutionStrategy            `toml:"default_strategy"` // Default strategy for all tables
+	TableStrategies map[string]ConflictResolutionStrategy `toml:"table_strategies"` // Per-table strategy overrides
+}
+
 type Configuration struct {
 	SeqMapPath      string `toml:"seq_map_path"`
 	DBPath          string `toml:"db_path"`
@@ -112,12 +148,16 @@ type Configuration struct {
 	SleepTimeout    uint32 `toml:"sleep_timeout"`
 	PollingInterval uint32 `toml:"polling_interval"`
 
-	Snapshot       SnapshotConfiguration       `toml:"snapshot"`
-	ReplicationLog ReplicationLogConfiguration `toml:"replication_log"`
-	NATS           NATSConfiguration           `toml:"nats"`
-	Logging        LoggingConfiguration        `toml:"logging"`
-	Prometheus     PrometheusConfiguration     `toml:"prometheus"`
-	HealthCheck    *HealthCheckConfiguration   `toml:"health_check"`
+	Snapshot           SnapshotConfiguration            `toml:"snapshot"`
+	ReplicationLog     ReplicationLogConfiguration      `toml:"replication_log"`
+	NATS               NATSConfiguration                `toml:"nats"`
+	Logging            LoggingConfiguration             `toml:"logging"`
+	Prometheus         PrometheusConfiguration          `toml:"prometheus"`
+	HealthCheck        *HealthCheckConfiguration        `toml:"health_check"`
+	WALParser          WALParserConfiguration           `toml:"wal_parser"`
+	Checkpoint         CheckpointConfiguration          `toml:"checkpoint"`
+	Deduplication      DeduplicationConfiguration       `toml:"deduplication"`
+	ConflictResolution ConflictResolutionConfiguration  `toml:"conflict_resolution"`
 }
 
 var ConfigPathFlag = flag.String("config", "", "Path to configuration file")
@@ -192,6 +232,29 @@ var Config = &Configuration{
 		Path:     "/health",
 		Detailed: true,
 	},
+
+	WALParser: WALParserConfiguration{
+		BufferSize:          1000,                      // 1000 operations in memory
+		DiskBufferThreshold: 1000,                      // Spill to disk after 1000 ops
+		CheckpointThreshold: 104857600,                 // 100MB WAL size
+		WatchInterval:       100,                       // 100ms debounce
+	},
+
+	Checkpoint: CheckpointConfiguration{
+		DisableAutoCheckpoint: true,                    // Disable SQLite auto-checkpoint
+		StateFile:             path.Join(DataRootDir, "checkpoint-state.json"),
+		ForceCheckpointWALMB:  100,                     // Force checkpoint at 100MB
+	},
+
+	Deduplication: DeduplicationConfiguration{
+		RetentionWindow: 3600000,                       // 1 hour in milliseconds
+		DBPath:          path.Join(DataRootDir, "dedup.db"),
+	},
+
+	ConflictResolution: ConflictResolutionConfiguration{
+		DefaultStrategy: StrategyLWW,                   // Last-Write-Wins default
+		TableStrategies: make(map[string]ConflictResolutionStrategy),
+	},
 }
 
 func init() {
@@ -244,4 +307,73 @@ func (c *Configuration) SnapshotStorageType() SnapshotStoreType {
 
 func (c *Configuration) NodeName() string {
 	return fmt.Sprintf("%s-%d", NodeNamePrefix, c.NodeID)
+}
+
+// Validate validates the configuration
+func (c *Configuration) Validate() error {
+	// Validate DB path
+	if c.DBPath == "" {
+		return fmt.Errorf("db_path is required")
+	}
+
+	// Validate node ID
+	if c.NodeID == 0 {
+		return fmt.Errorf("node_id is required")
+	}
+
+	// Validate WAL parser configuration
+	if c.WALParser.BufferSize <= 0 {
+		return fmt.Errorf("wal_parser.buffer_size must be > 0")
+	}
+	if c.WALParser.DiskBufferThreshold <= 0 {
+		return fmt.Errorf("wal_parser.disk_buffer_threshold must be > 0")
+	}
+	if c.WALParser.CheckpointThreshold <= 0 {
+		return fmt.Errorf("wal_parser.checkpoint_threshold must be > 0")
+	}
+
+	// Validate checkpoint configuration
+	if c.Checkpoint.ForceCheckpointWALMB <= 0 {
+		return fmt.Errorf("checkpoint.force_checkpoint_wal_mb must be > 0")
+	}
+	if c.Checkpoint.StateFile == "" {
+		return fmt.Errorf("checkpoint.state_file is required")
+	}
+
+	// Validate deduplication configuration
+	if c.Deduplication.RetentionWindow <= 0 {
+		return fmt.Errorf("deduplication.retention_window must be > 0")
+	}
+	if c.Deduplication.DBPath == "" {
+		return fmt.Errorf("deduplication.db_path is required")
+	}
+
+	// Validate conflict resolution strategy
+	validStrategies := map[ConflictResolutionStrategy]bool{
+		StrategyLWW:        true,
+		StrategyCounter:    true,
+		StrategyAppendOnly: true,
+	}
+	if !validStrategies[c.ConflictResolution.DefaultStrategy] {
+		return fmt.Errorf("conflict_resolution.default_strategy must be one of: lww, counter, append-only")
+	}
+
+	// Validate table-specific strategies
+	for table, strategy := range c.ConflictResolution.TableStrategies {
+		if !validStrategies[strategy] {
+			return fmt.Errorf("conflict_resolution.table_strategies[%s] must be one of: lww, counter, append-only", table)
+		}
+	}
+
+	// Validate replication log configuration
+	if c.ReplicationLog.Shards <= 0 {
+		return fmt.Errorf("replication_log.shards must be > 0")
+	}
+
+	// Validate NATS configuration
+	if len(c.NATS.URLs) == 0 && c.NATS.ServerConfigFile == "" {
+		return fmt.Errorf("nats.urls or nats.server_config must be specified")
+	}
+
+	return nil
 }

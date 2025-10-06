@@ -19,6 +19,20 @@ type ReplicationChecker interface {
 	GetLastPublishedEventTime() time.Time
 }
 
+// WALParserChecker defines the interface for WAL parser health checks
+type WALParserChecker interface {
+	IsRunning() bool
+	GetCurrentLSN() int64
+	GetLastError() error
+}
+
+// CheckpointChecker defines the interface for checkpoint health checks
+type CheckpointChecker interface {
+	GetParsedLSN() int64
+	GetReplicatedLSN() int64
+	GetCheckpointedLSN() int64
+}
+
 // Status represents the health status of the HarmonyLite node
 type Status struct {
 	Status                      string    `json:"status"`
@@ -30,6 +44,12 @@ type Status struct {
 	TablesTracked               int       `json:"tables_tracked"`
 	LastReplicatedEventTime     time.Time `json:"last_replicated_event_timestamp,omitempty"`
 	LastPublishedEventTime      time.Time `json:"last_published_event_timestamp,omitempty"`
+	WALParserRunning            bool      `json:"wal_parser_running"`
+	CurrentLSN                  int64     `json:"current_lsn,omitempty"`
+	ParsedLSN                   int64     `json:"parsed_lsn,omitempty"`
+	ReplicatedLSN               int64     `json:"replicated_lsn,omitempty"`
+	CheckpointedLSN             int64     `json:"checkpointed_lsn,omitempty"`
+	WALParserError              string    `json:"wal_parser_error,omitempty"`
 	Version                     string    `json:"version"`
 }
 
@@ -37,6 +57,8 @@ type Status struct {
 type HealthChecker struct {
 	streamDB   DBChecker
 	replicator ReplicationChecker
+	walParser  WALParserChecker
+	checkpoint CheckpointChecker
 	nodeID     uint64
 	startTime  time.Time
 	version    string
@@ -53,39 +75,74 @@ func NewHealthChecker(streamDB DBChecker, replicator ReplicationChecker, nodeID 
 	}
 }
 
+// SetWALParserChecker sets the WAL parser checker (optional)
+func (c *HealthChecker) SetWALParserChecker(checker WALParserChecker) {
+	c.walParser = checker
+}
+
+// SetCheckpointChecker sets the checkpoint checker (optional)
+func (c *HealthChecker) SetCheckpointChecker(checker CheckpointChecker) {
+	c.checkpoint = checker
+}
+
 // Check performs a health check and returns the status
 func (c *HealthChecker) Check() Status {
 	dbConnected := c.checkDBConnection()
 	natsConnected := c.checkNatsConnection()
 	cdcInstalled := c.checkCDCHooks()
-	
-	healthy := dbConnected && natsConnected && cdcInstalled
+	walParserRunning := c.checkWALParser()
+
+	healthy := dbConnected && natsConnected && (cdcInstalled || walParserRunning)
 	status := "healthy"
 	if !healthy {
 		status = "unhealthy"
 	}
-	
+
 	healthStatus := Status{
-		Status:        status,
-		NodeID:        c.nodeID,
-		UptimeSeconds: int64(time.Since(c.startTime).Seconds()),
-		DBConnected:   dbConnected,
-		NatsConnected: natsConnected,
-		CDCInstalled:  cdcInstalled,
-		TablesTracked: c.getTablesTrackedCount(),
-		Version:       c.version,
+		Status:           status,
+		NodeID:           c.nodeID,
+		UptimeSeconds:    int64(time.Since(c.startTime).Seconds()),
+		DBConnected:      dbConnected,
+		NatsConnected:    natsConnected,
+		CDCInstalled:     cdcInstalled,
+		TablesTracked:    c.getTablesTrackedCount(),
+		WALParserRunning: walParserRunning,
+		Version:          c.version,
 	}
-	
+
 	// Add timestamps if available
 	if lastReplicated := c.getLastReplicatedEventTime(); !lastReplicated.IsZero() {
 		healthStatus.LastReplicatedEventTime = lastReplicated
 	}
-	
+
 	if lastPublished := c.getLastPublishedEventTime(); !lastPublished.IsZero() {
 		healthStatus.LastPublishedEventTime = lastPublished
 	}
-	
+
+	// Add WAL parser status
+	if c.walParser != nil {
+		healthStatus.CurrentLSN = c.walParser.GetCurrentLSN()
+		if err := c.walParser.GetLastError(); err != nil {
+			healthStatus.WALParserError = err.Error()
+		}
+	}
+
+	// Add checkpoint status
+	if c.checkpoint != nil {
+		healthStatus.ParsedLSN = c.checkpoint.GetParsedLSN()
+		healthStatus.ReplicatedLSN = c.checkpoint.GetReplicatedLSN()
+		healthStatus.CheckpointedLSN = c.checkpoint.GetCheckpointedLSN()
+	}
+
 	return healthStatus
+}
+
+// checkWALParser checks if the WAL parser is running
+func (c *HealthChecker) checkWALParser() bool {
+	if c.walParser == nil {
+		return false
+	}
+	return c.walParser.IsRunning()
 }
 
 // checkDBConnection checks if the database is connected and responsive

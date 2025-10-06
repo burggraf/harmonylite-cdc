@@ -37,6 +37,27 @@ build-linux-amd64:
 test:
 	go test -v ./...
 
+# Target for running unit tests
+.PHONY: test-unit
+test-unit:
+	go test -v ./tests/unit/...
+
+# Target for running integration tests
+.PHONY: test-integration
+test-integration:
+	go test -v ./tests/integration/...
+
+# Target for running E2E tests with Ginkgo
+.PHONY: test-e2e
+test-e2e:
+	go run github.com/onsi/ginkgo/v2/ginkgo -v ./tests/e2e/...
+
+# Target for running all tests with coverage
+.PHONY: test-coverage
+test-coverage:
+	go test -v -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
+
 # Target for installing the binary
 .PHONY: install
 install:
@@ -45,4 +66,4 @@ install:
 # Target for cleaning build artifacts
 .PHONY: clean
 clean:
-	rm -f harmonylite
+	rm -f harmonylite coverage.out coverage.html

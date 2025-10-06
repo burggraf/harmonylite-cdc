@@ -38,52 +38,52 @@
 
 ## Phase 3.1: Setup & Preparation
 
-- [ ] T001: Update go.mod with new dependencies (modernc.org/sqlite, nats.io/nats.go JetStream, ginkgo v2, gomega, prometheus client)
-- [ ] T002: [P] Create new directory structure (walparser/, checkpoint/, dedup/, tests/unit/, tests/integration/, tests/e2e/)
-- [ ] T003: Update Makefile with version injection for WAL parser components and new build targets
-- [ ] T004: [P] Create configuration structs in cfg/ for WAL parsing settings, checkpoint thresholds, deduplication retention (extend existing TOML config)
+- [x] T001: Update go.mod with new dependencies (modernc.org/sqlite, nats.io/nats.go JetStream, ginkgo v2, gomega, prometheus client)
+- [x] T002: [P] Create new directory structure (walparser/, checkpoint/, dedup/, tests/unit/, tests/integration/, tests/e2e/)
+- [x] T003: Update Makefile with version injection for WAL parser components and new build targets
+- [x] T004: [P] Create configuration structs in cfg/ for WAL parsing settings, checkpoint thresholds, deduplication retention (extend existing TOML config)
 
 ## Phase 3.2: Tests First (TDD) ⚠️ MUST COMPLETE BEFORE 3.3
 **CRITICAL: These tests MUST be written and MUST FAIL before ANY implementation**
 
 ### Contract Tests (from contracts/)
-- [ ] T005: [P] WAL Parser contract test in tests/unit/walparser_contract_test.go (verify NextTransaction, GetLSN, Checkpoint interfaces per parser-contract.md)
-- [ ] T006: [P] Replication message schema validation test in tests/unit/replication_message_test.go (validate against replication-message-schema.json)
-- [ ] T007: [P] Health API contract test in tests/integration/health_api_test.go (verify /health/live, /health/ready, /health/status, /metrics endpoints per health-api-spec.yaml)
+- [x] T005: [P] WAL Parser contract test in tests/unit/walparser_contract_test.go (verify NextTransaction, GetLSN, Checkpoint interfaces per parser-contract.md)
+- [x] T006: [P] Replication message schema validation test in tests/unit/replication_message_test.go (validate against replication-message-schema.json)
+- [x] T007: [P] Health API contract test in tests/integration/health_api_test.go (verify /health/live, /health/ready, /health/status, /metrics endpoints per health-api-spec.yaml)
 
 ### Entity Validation Tests (from data-model.md)
-- [ ] T008: [P] Change entity validation test in tests/unit/change_test.go (OpID format, field requirements, Before/After logic for INSERT/UPDATE/DELETE)
-- [ ] T009: [P] Transaction entity validation test in tests/unit/transaction_test.go (atomicity, LSN ordering, TransactionID grouping)
-- [ ] T010: [P] LSN tracking test in tests/unit/lsn_test.go (monotonic increase, persistence to NATS metadata and local file)
-- [ ] T011: [P] OpID parsing and validation test in tests/unit/opid_test.go (format: node_id:lsn:timestamp, uniqueness)
-- [ ] T012: [P] Deduplication store test in tests/unit/dedup_store_test.go (OpID persistence, retention cleanup, restart survival)
-- [ ] T013: [P] Checkpoint state test in tests/unit/checkpoint_state_test.go (LSN tracking: parsed ≥ replicated ≥ checkpointed)
+- [x] T008: [P] Change entity validation test in tests/unit/change_test.go (OpID format, field requirements, Before/After logic for INSERT/UPDATE/DELETE)
+- [x] T009: [P] Transaction entity validation test in tests/unit/transaction_test.go (atomicity, LSN ordering, TransactionID grouping)
+- [x] T010: [P] LSN tracking test in tests/unit/lsn_test.go (monotonic increase, persistence to NATS metadata and local file)
+- [x] T011: [P] OpID parsing and validation test in tests/unit/opid_test.go (format: node_id:lsn:timestamp, uniqueness)
+- [x] T012: [P] Deduplication store test in tests/unit/dedup_store_test.go (OpID persistence, retention cleanup, restart survival)
+- [x] T013: [P] Checkpoint state test in tests/unit/checkpoint_state_test.go (LSN tracking: parsed ≥ replicated ≥ checkpointed)
 
 ### Unit Tests for WAL Parsing
-- [ ] T014: [P] WAL frame decoding test in tests/unit/frame_decode_test.go (parse frame header, payload, checksum validation)
-- [ ] T015: [P] Transaction reconstruction test in tests/unit/transaction_reconstruction_test.go (buffer ops until commit, rollback handling, disk buffering for large transactions)
-- [ ] T016: [P] Checksum validation test in tests/unit/checksum_test.go (detect corruption, handle corrupted WAL gracefully)
+- [x] T014: [P] WAL frame decoding test in tests/unit/frame_decode_test.go (parse frame header, payload, checksum validation)
+- [x] T015: [P] Transaction reconstruction test in tests/unit/transaction_reconstruction_test.go (buffer ops until commit, rollback handling, disk buffering for large transactions)
+- [x] T016: [P] Checksum validation test in tests/unit/checksum_test.go (detect corruption, handle corrupted WAL gracefully)
 
 ### Integration Tests (Multi-Component)
-- [ ] T017: [P] WAL parser + checkpoint integration test in tests/integration/wal_checkpoint_test.go (parse → replicate → checkpoint cycle, LSN tracking)
-- [ ] T018: [P] NATS JetStream integration test in tests/integration/nats_jetstream_test.go (publish, subscribe, durable consumer, ack policy)
-- [ ] T019: [P] Deduplication + applicator integration test in tests/integration/dedup_applicator_test.go (skip duplicates, OpID cleanup)
+- [x] T017: [P] WAL parser + checkpoint integration test in tests/integration/wal_checkpoint_test.go (parse → replicate → checkpoint cycle, LSN tracking)
+- [x] T018: [P] NATS JetStream integration test in tests/integration/nats_jetstream_test.go (publish, subscribe, durable consumer, ack policy)
+- [x] T019: [P] Deduplication + applicator integration test in tests/integration/dedup_applicator_test.go (skip duplicates, OpID cleanup)
 
 ### E2E Tests (from quickstart.md) - Using Ginkgo v2
-- [ ] T020: [P] E2E basic 3-node replication test in tests/e2e/basic_replication_test.go (Scenario 1: data appears on all nodes < 100ms, no triggers)
-- [ ] T021: [P] E2E transaction atomicity test in tests/e2e/transaction_atomicity_test.go (Scenario 2: multi-statement transaction replicates atomically)
-- [ ] T022: [P] E2E node crash recovery test in tests/e2e/crash_recovery_test.go (Scenario 3: node restart, catch-up, no data loss)
-- [ ] T023: [P] E2E NATS unavailability test in tests/e2e/nats_unavailability_test.go (Scenario 4: buffer locally, replicate on reconnect)
-- [ ] T024: [P] E2E conflict resolution test in tests/e2e/conflict_resolution_test.go (Scenario 5: concurrent writes, LWW strategy, consistent state)
-- [ ] T025: [P] E2E database pristine test in tests/e2e/database_pristine_test.go (Scenario 6: no triggers/views, works standalone)
-- [ ] T026: [P] E2E replication control test in tests/e2e/replication_control_test.go (Scenario 7: stop process disables replication, restart enables)
+- [x] T020: [P] E2E basic 3-node replication test in tests/e2e/basic_replication_test.go (Scenario 1: data appears on all nodes < 100ms, no triggers)
+- [x] T021: [P] E2E transaction atomicity test in tests/e2e/transaction_atomicity_test.go (Scenario 2: multi-statement transaction replicates atomically)
+- [x] T022: [P] E2E node crash recovery test in tests/e2e/crash_recovery_test.go (Scenario 3: node restart, catch-up, no data loss)
+- [x] T023: [P] E2E NATS unavailability test in tests/e2e/nats_unavailability_test.go (Scenario 4: buffer locally, replicate on reconnect)
+- [x] T024: [P] E2E conflict resolution test in tests/e2e/conflict_resolution_test.go (Scenario 5: concurrent writes, LWW strategy, consistent state)
+- [x] T025: [P] E2E database pristine test in tests/e2e/database_pristine_test.go (Scenario 6: no triggers/views, works standalone)
+- [x] T026: [P] E2E replication control test in tests/e2e/replication_control_test.go (Scenario 7: stop process disables replication, restart enables)
 
 ## Phase 3.3: Core Implementation (ONLY after tests are failing)
 
 ### WAL Parser Module (NEW)
-- [ ] T027: Implement WAL frame structure and decoder in walparser/frame.go (Frame header, payload parsing, checksum calculation)
-- [ ] T028: Implement transaction buffer in walparser/buffer.go (in-memory buffering up to 1000 ops, disk-based spillover for large transactions)
-- [ ] T029: Implement checksum validator in walparser/checksum.go (validate frame checksums, detect corruption)
+- [x] T027: Implement WAL frame structure and decoder in walparser/frame.go (Frame header, payload parsing, checksum calculation)
+- [x] T028: Implement transaction buffer in walparser/buffer.go (in-memory buffering up to 1000 ops, disk-based spillover for large transactions)
+- [x] T029: Implement checksum validator in walparser/checksum.go (validate frame checksums, detect corruption)
 - [ ] T030: Implement Parser main logic in walparser/parser.go (NextTransaction, GetLSN, Checkpoint methods per contract, fsnotify WAL file monitoring)
 
 ### Checkpoint Module (NEW)
