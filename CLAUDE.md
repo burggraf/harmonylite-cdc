@@ -249,6 +249,84 @@ version.Get().String()
 - `github.com/prometheus/client_golang` (metrics)
 - `github.com/fsnotify/fsnotify` (filesystem watching)
 
+## Concurrency Model: SQLite Single-Writer Constraint
+
+### Understanding SQLite WAL Mode Concurrency
+
+**SQLite in WAL mode supports**:
+- **Multiple concurrent readers** (unlimited, non-blocking)
+- **ONE writer at a time** (enforced by write lock)
+- **Readers don't block writers** (readers see snapshot at last commit)
+
+### HarmonyLite CDC + Application Co-Writing
+
+**The system is designed for multi-primary replication**, meaning:
+- Each node can have a local application (e.g., PocketBase) writing to SQLite
+- HarmonyLite CDC replicates remote changes to the local database
+- **Both compete for the single write lock**
+
+### How Write Contention is Handled
+
+**Configuration** (`db/sqlite.go:55`):
+```
+_busy_timeout=30000  // 30 seconds
+```
+
+**Behavior**:
+- When HarmonyLite (applicator) attempts a write while PocketBase holds the lock:
+  - SQLite automatically retries with exponential backoff for up to 30 seconds
+  - Most writes complete in 1-10ms, so retries succeed quickly
+- When PocketBase attempts a write while HarmonyLite holds the lock:
+  - Same retry behavior applies
+
+**Performance Implications**:
+- **Combined throughput limited by single-writer constraint**: ~500-1000 writes/sec
+- **Individual write latency increases** under contention (p95 may exceed 100ms target)
+- **Works well for**: Read-heavy workloads, moderate write rates (< 500 ops/sec per writer)
+- **Problematic for**: High concurrent write rates (> 500 ops/sec combined)
+
+### Recommended Deployment Patterns
+
+**✅ Pattern 1: Multi-Node Edge Deployment** (Optimal)
+```
+Node A: PocketBase writes locally → HarmonyLite publishes changes
+Node B: PocketBase writes locally → HarmonyLite publishes changes
+Node C: PocketBase writes locally → HarmonyLite publishes changes
+All nodes: HarmonyLite applies remote changes
+```
+- Each node primarily writes locally (low contention)
+- Remote replication writes are infrequent per node
+- Natural partitioning reduces write lock conflicts
+
+**✅ Pattern 2: Primary + Read-Only Replicas**
+```
+Primary: PocketBase writes → HarmonyLite publishes
+Replicas: HarmonyLite applies changes only (no local writes)
+```
+- Replicas have zero write contention
+- Primary may have moderate contention if application writes heavily
+
+**⚠️ Pattern 3: Single High-Throughput Node**
+```
+Single Node: PocketBase writes 500 ops/sec + HarmonyLite writes 500 ops/sec
+```
+- Combined 1000 ops/sec approaches SQLite write limit
+- Expect increased latency and potential timeouts under load
+
+### Testing Write Contention
+
+See `tests/integration/concurrent_write_test.go` for contention verification:
+- `TestConcurrentWriteContention`: Simulates PocketBase + HarmonyLite concurrent writes
+- `TestBusyTimeoutConfiguration`: Verifies busy_timeout is correctly configured
+- Run: `go test -v ./tests/integration -run TestConcurrent`
+
+### Monitoring Write Lock Contention
+
+**Key Metrics** (to be added to `telemetry/`):
+- `sqlite_write_lock_wait_seconds`: Histogram of lock wait times
+- `sqlite_busy_errors_total`: Counter of SQLITE_BUSY errors (should be zero with busy_timeout)
+- `replication_write_latency_seconds`: p50/p95/p99 write latency for remote changes
+
 ## Performance Considerations
 
 - **WAL Parsing**: Target 10,000 ops/sec raw parsing throughput
@@ -256,3 +334,4 @@ version.Get().String()
 - **Disk Buffer**: Activates for transactions > 1000 operations
 - **Checkpoint**: Triggered when WAL > 100MB (configurable)
 - **Deduplication**: OpID cleanup after 1 hour retention (configurable)
+- **Write Throughput**: 500-1000 combined ops/sec per database (SQLite single-writer limit)
